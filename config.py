@@ -58,12 +58,14 @@ class SecurityPolicy:
         ModbusFunctionCode.READ_DISCRETE_INPUTS,
         ModbusFunctionCode.READ_HOLDING_REGISTERS,
         ModbusFunctionCode.READ_INPUT_REGISTERS,
+        ModbusFunctionCode.WRITE_SINGLE_COIL,
+        ModbusFunctionCode.WRITE_SINGLE_REGISTER,
     })
     
     # Blacklist: Function codes that are explicitly blocked
     blocked_function_codes: Set[int] = field(default_factory=lambda: {
-        ModbusFunctionCode.WRITE_SINGLE_COIL,
-        ModbusFunctionCode.WRITE_SINGLE_REGISTER,
+        
+        
         ModbusFunctionCode.WRITE_MULTIPLE_COILS,
         ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
         ModbusFunctionCode.READ_WRITE_MULTIPLE_REGISTERS,

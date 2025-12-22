@@ -10,7 +10,7 @@ from pyModbusTCP.client import ModbusClient
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.prompt import Prompt, IntPrompt
+from rich.prompt import Prompt, IntPrompt, Confirm
 
 from config import DEFAULT_CONFIG, ModbusFunctionCode
 
@@ -23,6 +23,20 @@ class ModbusHMI:
         self.host = host
         self.port = port
         self.client = None
+        self.security_policy = DEFAULT_CONFIG.security
+    
+    def get_operation_status(self, function_code: int) -> str:
+        """Get the allowed/blocked status for a function code based on security policy"""
+        if function_code in self.security_policy.allowed_function_codes:
+            return "[green]✓ Allowed[/green]"
+        elif function_code in self.security_policy.blocked_function_codes:
+            return "[red]✗ Blocked[/red]"
+        else:
+            return "[yellow]? Unknown[/yellow]"
+    
+    def is_operation_allowed(self, function_code: int) -> bool:
+        """Check if a function code is allowed by security policy"""
+        return function_code in self.security_policy.allowed_function_codes
         
     def connect(self) -> bool:
         """Connect to the Modbus server (through firewall)"""
@@ -123,40 +137,64 @@ class ModbusHMI:
             self.console.print("[red]✗[/red] Read failed (possibly blocked by firewall)")
     
     def write_single_coil(self, address: int, value: bool):
-        """Write single coil (FC 05) - Should be blocked by firewall"""
+        """Write single coil (FC 05)"""
         self.console.print(f"\n[yellow]⚠ Attempting to write coil {address} = {value}...[/yellow]")
-        self.console.print("[dim]This should be BLOCKED by the firewall[/dim]")
+        
+        is_allowed = self.is_operation_allowed(ModbusFunctionCode.WRITE_SINGLE_COIL)
+        if not is_allowed:
+            self.console.print("[dim]This operation is blocked by security policy[/dim]")
         
         result = self.client.write_single_coil(address, value)
         
         if result:
-            self.console.print("[red]⚠ WARNING: Write succeeded! Firewall may not be working![/red]")
+            self.console.print(f"[green]✓[/green] Write succeeded! Coil {address} set to {value}")
         else:
-            self.console.print("[green]✓[/green] Write was blocked (as expected)")
+            # Debug: show actual error
+            last_error = self.client.last_error
+            last_error_txt = self.client.last_error_as_txt
+            self.console.print(f"[dim]Debug: error_code={last_error}, error_txt={last_error_txt}[/dim]")
+            
+            if is_allowed:
+                self.console.print("[red]✗[/red] Write failed (see debug info above)")
+            else:
+                self.console.print("[green]✓[/green] Write was blocked by firewall (as expected)")
     
     def write_single_register(self, address: int, value: int):
-        """Write single register (FC 06) - Should be blocked by firewall"""
+        """Write single register (FC 06)"""
         self.console.print(f"\n[yellow]⚠ Attempting to write register {address} = {value}...[/yellow]")
-        self.console.print("[dim]This should be BLOCKED by the firewall[/dim]")
+        
+        is_allowed = self.is_operation_allowed(ModbusFunctionCode.WRITE_SINGLE_REGISTER)
+        if not is_allowed:
+            self.console.print("[dim]This operation is blocked by security policy[/dim]")
         
         result = self.client.write_single_register(address, value)
         
         if result:
-            self.console.print("[red]⚠ WARNING: Write succeeded! Firewall may not be working![/red]")
+            self.console.print(f"[green]✓[/green] Write succeeded! Register {address} set to {value}")
         else:
-            self.console.print("[green]✓[/green] Write was blocked (as expected)")
+            if is_allowed:
+                self.console.print("[red]✗[/red] Write failed (connection issue)")
+            else:
+                self.console.print("[green]✓[/green] Write was blocked by firewall (as expected)")
     
     def write_multiple_registers(self, start_addr: int, values: list):
-        """Write multiple registers (FC 16) - Should be blocked by firewall"""
+        """Write multiple registers (FC 16)"""
         self.console.print(f"\n[yellow]⚠ Attempting to write {len(values)} registers from address {start_addr}...[/yellow]")
-        self.console.print("[dim]This should be BLOCKED by the firewall[/dim]")
+        self.console.print(f"[dim]Values: {values}[/dim]")
+        
+        is_allowed = self.is_operation_allowed(ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS)
+        if not is_allowed:
+            self.console.print("[dim]This operation is blocked by security policy[/dim]")
         
         result = self.client.write_multiple_registers(start_addr, values)
         
         if result:
-            self.console.print("[red]⚠ WARNING: Write succeeded! Firewall may not be working![/red]")
+            self.console.print(f"[green]✓[/green] Write succeeded! Registers {start_addr}-{start_addr + len(values) - 1} updated")
         else:
-            self.console.print("[green]✓[/green] Write was blocked (as expected)")
+            if is_allowed:
+                self.console.print("[red]✗[/red] Write failed (connection issue)")
+            else:
+                self.console.print("[green]✓[/green] Write was blocked by firewall (as expected)")
     
     def run_interactive(self):
         """Run interactive menu"""
@@ -171,35 +209,54 @@ class ModbusHMI:
         
         while True:
             self.console.print("\n[bold]Operations:[/bold]")
-            self.console.print("  [1] Read Coils (FC 01) [green]✓ Allowed[/green]")
-            self.console.print("  [2] Read Discrete Inputs (FC 02) [green]✓ Allowed[/green]")
-            self.console.print("  [3] Read Holding Registers (FC 03) [green]✓ Allowed[/green]")
-            self.console.print("  [4] Read Input Registers (FC 04) [green]✓ Allowed[/green]")
-            self.console.print("  [5] Write Single Coil (FC 05) [red]✗ Blocked[/red]")
-            self.console.print("  [6] Write Single Register (FC 06) [red]✗ Blocked[/red]")
-            self.console.print("  [7] Write Multiple Registers (FC 16) [red]✗ Blocked[/red]")
+            self.console.print(f"  [1] Read Coils (FC 01) {self.get_operation_status(ModbusFunctionCode.READ_COILS)}")
+            self.console.print(f"  [2] Read Discrete Inputs (FC 02) {self.get_operation_status(ModbusFunctionCode.READ_DISCRETE_INPUTS)}")
+            self.console.print(f"  [3] Read Holding Registers (FC 03) {self.get_operation_status(ModbusFunctionCode.READ_HOLDING_REGISTERS)}")
+            self.console.print(f"  [4] Read Input Registers (FC 04) {self.get_operation_status(ModbusFunctionCode.READ_INPUT_REGISTERS)}")
+            self.console.print(f"  [5] Write Single Coil (FC 05) {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_COIL)}")
+            self.console.print(f"  [6] Write Single Register (FC 06) {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_REGISTER)}")
+            self.console.print(f"  [7] Write Multiple Registers (FC 16) {self.get_operation_status(ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS)}")
             self.console.print("  [8] Run All Tests")
+            self.console.print("  [9] Show Security Policy")
             self.console.print("  [0] Exit")
             
             try:
                 choice = Prompt.ask("\nSelect operation", default="0")
                 
                 if choice == "1":
-                    self.read_coils()
+                    addr = IntPrompt.ask("Start address", default=0)
+                    count = IntPrompt.ask("Number of coils", default=10)
+                    self.read_coils(addr, count)
                 elif choice == "2":
-                    self.read_discrete_inputs()
+                    addr = IntPrompt.ask("Start address", default=0)
+                    count = IntPrompt.ask("Number of inputs", default=10)
+                    self.read_discrete_inputs(addr, count)
                 elif choice == "3":
-                    self.read_holding_registers()
+                    addr = IntPrompt.ask("Start address", default=0)
+                    count = IntPrompt.ask("Number of registers", default=10)
+                    self.read_holding_registers(addr, count)
                 elif choice == "4":
-                    self.read_input_registers()
+                    addr = IntPrompt.ask("Start address", default=0)
+                    count = IntPrompt.ask("Number of registers", default=10)
+                    self.read_input_registers(addr, count)
                 elif choice == "5":
-                    self.write_single_coil(0, True)
+                    addr = IntPrompt.ask("Coil address", default=0)
+                    val_str = Prompt.ask("Value (true/false)", default="true")
+                    val = val_str.lower() in ("true", "1", "yes", "on")
+                    self.write_single_coil(addr, val)
                 elif choice == "6":
-                    self.write_single_register(0, 999)
+                    addr = IntPrompt.ask("Register address", default=0)
+                    val = IntPrompt.ask("Value (0-65535)", default=0)
+                    self.write_single_register(addr, val)
                 elif choice == "7":
-                    self.write_multiple_registers(0, [100, 200, 300])
+                    addr = IntPrompt.ask("Start address", default=0)
+                    val_str = Prompt.ask("Values (comma-separated)", default="100,200,300")
+                    values = [int(v.strip()) for v in val_str.split(",")]
+                    self.write_multiple_registers(addr, values)
                 elif choice == "8":
                     self.run_all_tests()
+                elif choice == "9":
+                    self.show_security_policy()
                 elif choice == "0":
                     break
                 else:
@@ -211,6 +268,25 @@ class ModbusHMI:
                 self.console.print(f"[red]Error: {e}[/red]")
         
         self.disconnect()
+    
+    def show_security_policy(self):
+        """Display current security policy configuration"""
+        from config import get_function_code_name
+        
+        lines = ["[bold cyan]Current Security Policy[/bold cyan]\n"]
+        
+        lines.append("[green]Allowed Function Codes:[/green]")
+        for fc in sorted(self.security_policy.allowed_function_codes):
+            lines.append(f"  • 0x{fc:02X}: {get_function_code_name(fc)}")
+        
+        lines.append("\n[red]Blocked Function Codes:[/red]")
+        for fc in sorted(self.security_policy.blocked_function_codes):
+            lines.append(f"  • 0x{fc:02X}: {get_function_code_name(fc)}")
+        
+        lines.append(f"\n[yellow]Write-Allowed IPs:[/yellow] {self.security_policy.write_allowed_ips or 'None'}")
+        lines.append(f"[yellow]Rate Limit:[/yellow] {self.security_policy.rate_limit} req/s per client")
+        
+        self.console.print(Panel("\n".join(lines), border_style="cyan"))
     
     def run_all_tests(self):
         """Run all tests sequentially"""

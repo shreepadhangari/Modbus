@@ -1,0 +1,61 @@
+# Security Alerts Log
+[SECURITY ALERT] 2025-12-09T21:29:08.598875
+  Blocked WRITE_SINGLE_COIL (FC:05)
+  Source: 127.0.0.1:52106
+  Transaction ID: 34484
+  Reason: WRITE_SINGLE_COIL (FC:0x05) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-09T21:29:09.109891
+  Blocked WRITE_SINGLE_REGISTER (FC:06)
+  Source: 127.0.0.1:52106
+  Transaction ID: 45111
+  Reason: WRITE_SINGLE_REGISTER (FC:0x06) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-09T21:29:09.674032
+  Blocked WRITE_MULTIPLE_REGISTERS (FC:10)
+  Source: 127.0.0.1:52106
+  Transaction ID: 29454
+  Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T15:48:04.027973
+  Blocked WRITE_SINGLE_COIL (FC:05)
+  Source: 127.0.0.1:56005
+  Transaction ID: 46794
+  Reason: WRITE_SINGLE_COIL (FC:0x05) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T15:48:04.534734
+  Blocked WRITE_SINGLE_REGISTER (FC:06)
+  Source: 127.0.0.1:56005
+  Transaction ID: 33104
+  Reason: WRITE_SINGLE_REGISTER (FC:0x06) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T15:48:05.044084
+  Blocked WRITE_MULTIPLE_REGISTERS (FC:10)
+  Source: 127.0.0.1:56005
+  Transaction ID: 51290
+  Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T16:16:38.244569
+  Blocked WRITE_SINGLE_COIL (FC:05)
+  Source: 10.24.115.59:55222
+  Transaction ID: 37024
+  Reason: WRITE_SINGLE_COIL (FC:0x05) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T16:16:38.785310
+  Blocked WRITE_SINGLE_REGISTER (FC:06)
+  Source: 10.24.115.59:55222
+  Transaction ID: 2925
+  Reason: WRITE_SINGLE_REGISTER (FC:0x06) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T16:16:39.303371
+  Blocked WRITE_MULTIPLE_REGISTERS (FC:10)
+  Source: 10.24.115.59:55222
+  Transaction ID: 61206
+  Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-22T16:33:55.239573
+  Blocked WRITE_MULTIPLE_REGISTERS (FC:10)
+  Source: 10.24.115.59:57713
+  Transaction ID: 34278
+  Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
+---
