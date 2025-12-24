@@ -59,3 +59,15 @@
   Transaction ID: 34278
   Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
 ---
+[SECURITY ALERT] 2025-12-24T17:22:36.936357
+  Blocked WRITE_MULTIPLE_REGISTERS (FC:10)
+  Source: 127.0.0.1:62589
+  Transaction ID: 63211
+  Reason: WRITE_MULTIPLE_REGISTERS (FC:0x10) is blocked by security policy
+---
+[SECURITY ALERT] 2025-12-24T17:24:33.887744
+  Blocked WRITE_SINGLE_COIL (FC:05)
+  Source: 127.0.0.1:50336
+  Transaction ID: 28756
+  Reason: WRITE_SINGLE_COIL (FC:0x05) is blocked by security policy
+---

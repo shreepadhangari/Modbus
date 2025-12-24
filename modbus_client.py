@@ -103,11 +103,34 @@ class ModbusHMI:
         if result is not None:
             table = Table(title="Holding Registers (FC 03)")
             table.add_column("Address", justify="right")
-            table.add_column("Value", justify="right")
-            table.add_column("Hex", justify="right")
+            table.add_column("Name", width=12)
+            table.add_column("Raw", justify="right")
+            table.add_column("Scaled", justify="right")
+            
+            # Same scaling as server
+            reg_info = {
+                0: ("Temp SP", "°C", 10),
+                1: ("Press SP", "kPa", 10),
+                2: ("Flow SP", "L/min", 10),
+                3: ("Level SP", "%", 10),
+                4: ("Motor Spd", "%", 10),
+                5: ("Mode", "", 1),
+            }
             
             for i, val in enumerate(result):
-                table.add_row(str(start_addr + i), str(val), f"0x{val:04X}")
+                addr = start_addr + i
+                if addr in reg_info:
+                    name, unit, scale = reg_info[addr]
+                    if addr == 5:
+                        scaled = "Auto" if val == 0 else "Manual"
+                    elif unit:
+                        scaled = f"{val/scale:.1f} {unit}"
+                    else:
+                        scaled = str(val)
+                else:
+                    name = f"HR {addr}"
+                    scaled = str(val)
+                table.add_row(str(addr), name, str(val), scaled)
             
             self.console.print(table)
         else:
@@ -122,15 +145,31 @@ class ModbusHMI:
         if result is not None:
             table = Table(title="Input Registers (FC 04)")
             table.add_column("Address", justify="right")
-            table.add_column("Value", justify="right")
+            table.add_column("Name", width=12)
+            table.add_column("Raw", justify="right")
             table.add_column("Scaled", justify="right")
             
-            names = ["Temp (°C)", "Pressure (kPa)", "Flow (L/min)", "Level (%)", "Voltage (V)", "Current (A)"]
+            # Same scaling as server
+            reg_info = {
+                0: ("Temperature", "°C", 10),
+                1: ("Pressure", "kPa", 10),
+                2: ("Flow Rate", "L/min", 10),
+                3: ("Tank Level", "%", 10),
+                4: ("Voltage", "V", 10),
+                5: ("Current", "A", 10),
+                6: ("Power", "kW", 10),
+                7: ("Frequency", "Hz", 10),
+            }
             
             for i, val in enumerate(result):
-                scaled = f"{val/10:.1f}" if i < len(names) else str(val)
-                name = names[i] if i < len(names) else ""
-                table.add_row(f"{start_addr + i} {name}", str(val), scaled)
+                addr = start_addr + i
+                if addr in reg_info:
+                    name, unit, scale = reg_info[addr]
+                    scaled = f"{val/scale:.1f} {unit}"
+                else:
+                    name = f"IR {addr}"
+                    scaled = str(val)
+                table.add_row(str(addr), name, str(val), scaled)
             
             self.console.print(table)
         else:

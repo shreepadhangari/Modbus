@@ -182,14 +182,12 @@ class SimulatedPLC:
         coils_table.add_column("Addr", justify="right", width=5)
         coils_table.add_column("Name", width=12)
         coils_table.add_column("Value", width=8)
-        coils_table.add_column("Status", width=10)
         
         coils = self.data_bank.get_coils(0, 20) or []
         for i in range(min(20, len(coils))):
             name = self.coil_names.get(i, f"Coil {i}")
             val = "[green]ON[/green]" if coils[i] else "[red]OFF[/red]"
-            status = self.activity_tracker.get_status("coil", i)
-            coils_table.add_row(str(i), name, val, status)
+            coils_table.add_row(str(i), name, val)
         
         # === DISCRETE INPUTS TABLE ===
         discrete_table = Table(title="[bold cyan]Discrete Inputs (FC 02)[/bold cyan]", 
@@ -228,8 +226,7 @@ class SimulatedPLC:
         holding_table.add_column("Addr", justify="right", width=5)
         holding_table.add_column("Name", width=12)
         holding_table.add_column("Raw", justify="right", width=6)
-        holding_table.add_column("Scaled", justify="right", width=10)
-        holding_table.add_column("Status", width=10)
+        holding_table.add_column("Scaled", justify="right", width=12)
         
         holding_regs = self.data_bank.get_holding_registers(0, 20) or []
         for i in range(min(20, len(holding_regs))):
@@ -244,8 +241,7 @@ class SimulatedPLC:
             else:
                 name = f"HR {i}"
                 scaled = str(holding_regs[i])
-            status = self.activity_tracker.get_status("holding", i)
-            holding_table.add_row(str(i), name, str(holding_regs[i]), scaled, status)
+            holding_table.add_row(str(i), name, str(holding_regs[i]), scaled)
         
         # Combine tables
         left = Table.grid()
