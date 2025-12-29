@@ -2,11 +2,15 @@
 Modbus Firewall - Main Firewall Implementation
 
 Transparent proxy firewall with Deep Packet Inspection and security policy enforcement.
+Supports localtunnel for remote internet access.
 """
 
 import asyncio
 import signal
 import sys
+import subprocess
+import re
+import shutil
 from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 from rich.console import Console
@@ -17,6 +21,7 @@ from config import DEFAULT_CONFIG, get_function_code_name
 from dpi_engine import DPIEngine, ModbusException
 from security_policy import SecurityPolicyEngine, PolicyDecision
 from logging_system import ModbusLogger, LogAction, get_logger
+from http_bridge import ModbusHttpBridge
 
 
 @dataclass
@@ -61,6 +66,15 @@ class ModbusFirewall:
         self.total_allowed = 0
         self.total_blocked = 0
         self.total_errors = 0
+        
+        # Localtunnel process
+        self.tunnel_process: Optional[subprocess.Popen] = None
+        self.tunnel_url: Optional[str] = None
+        self.tunnel_enabled = True  # Enabled by default, use --no-tunnel to disable
+        
+        # HTTP Bridge for LocalTunnel (Modbus over HTTP)
+        self.http_bridge: Optional[ModbusHttpBridge] = None
+        self.http_bridge_port = 8080
     
     async def handle_client(
         self,
@@ -285,6 +299,10 @@ class ModbusFirewall:
         addr = self.server.sockets[0].getsockname()
         self.console.print(f"\n[green]✓[/green] Firewall listening on {addr[0]}:{addr[1]}")
         self.console.print(f"[green]✓[/green] Ready to proxy Modbus traffic\n")
+        
+        # Start localtunnel for remote access
+        await self.start_tunnel()
+        
         self.console.print("[dim]Press Ctrl+C to stop[/dim]\n")
         
         async with self.server:
@@ -293,9 +311,132 @@ class ModbusFirewall:
             except asyncio.CancelledError:
                 pass
     
+    async def start_tunnel(self):
+        """Start localtunnel for remote internet access via HTTP bridge"""
+        # Check if tunnel is enabled
+        if not self.tunnel_enabled:
+            self.console.print("[dim]Localtunnel disabled (use --tunnel to enable)[/dim]\n")
+            return
+        
+        # Check if npx or lt is available
+        npx_path = shutil.which("npx")
+        lt_path = shutil.which("lt")
+        
+        if not npx_path and not lt_path:
+            self.console.print("[yellow]⚠[/yellow] localtunnel not found. Install with: npm install -g localtunnel")
+            self.console.print("[dim]Remote access will not be available[/dim]\n")
+            return
+        
+        # Start HTTP Bridge first (bridges HTTP to local Modbus firewall)
+        self.http_bridge = ModbusHttpBridge(
+            modbus_host="127.0.0.1",
+            modbus_port=self.config.network.firewall_port,
+            http_port=self.http_bridge_port
+        )
+        await self.http_bridge.start()
+        
+        # Now start localtunnel pointing to the HTTP bridge port
+        try:
+            if lt_path:
+                cmd = [lt_path, "--port", str(self.http_bridge_port)]
+            else:
+                cmd = [npx_path, "-y", "localtunnel", "--port", str(self.http_bridge_port)]
+            
+            self.console.print(f"[cyan]Starting localtunnel on port {self.http_bridge_port}...[/cyan]")
+            
+            # Start tunnel process
+            self.tunnel_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                text=True,
+                bufsize=1
+            )
+            
+            # Read output with timeout
+            import threading
+            
+            captured_lines = []
+            
+            def read_output():
+                try:
+                    for line in iter(self.tunnel_process.stdout.readline, ''):
+                        if not line:
+                            break
+                        line = line.strip()
+                        captured_lines.append(line)
+                        # Look for URL in the output
+                        url_match = re.search(r'https?://[^\s]+\.loca\.lt[^\s]*', line)
+                        if not url_match:
+                            url_match = re.search(r'https?://[^\s]+localtunnel[^\s]*', line)
+                        if not url_match:
+                            url_match = re.search(r'https?://[^\s]+', line)
+                        if url_match:
+                            self.tunnel_url = url_match.group(0)
+                            break
+                except:
+                    pass
+            
+            # Start thread to read output
+            read_thread = threading.Thread(target=read_output, daemon=True)
+            read_thread.start()
+            
+            # Wait for URL to be captured (max 10 seconds)
+            for _ in range(20):
+                await asyncio.sleep(0.5)
+                if self.tunnel_url:
+                    break
+            
+            if self.tunnel_url:
+                # Extract just the hostname for client connection
+                self.console.print(Panel(
+                    f"[bold green]Remote Access URL[/bold green]\n\n"
+                    f"[bold cyan]{self.tunnel_url}[/bold cyan]\n\n"
+                    f"[dim]Share this URL with remote clients.\n"
+                    f"They should connect using:[/dim]\n\n"
+                    f"[yellow]python modbus_client.py --remote {self.tunnel_url}[/yellow]",
+                    title="🌐 LocalTunnel Active (HTTP Bridge)",
+                    border_style="green"
+                ))
+            else:
+                self.console.print("[yellow]⚠[/yellow] Could not capture tunnel URL automatically.")
+                if captured_lines:
+                    self.console.print(f"[dim]Tunnel output: {captured_lines[-3:]}[/dim]")
+                self.console.print("[dim]Check if tunnel is running with 'lt --port 502' manually[/dim]\n")
+                
+        except Exception as e:
+            self.console.print(f"[red]✗[/red] Failed to start localtunnel: {e}\n")
+            self.tunnel_process = None
+    
+    def stop_tunnel(self):
+        """Stop the localtunnel process and HTTP bridge"""
+        if self.tunnel_process:
+            try:
+                self.tunnel_process.terminate()
+                self.tunnel_process.wait(timeout=5)
+            except:
+                self.tunnel_process.kill()
+            self.tunnel_process = None
+            self.tunnel_url = None
+            self.console.print("[dim]Localtunnel closed[/dim]")
+        
+        # Stop HTTP bridge
+        if self.http_bridge:
+            import asyncio
+            try:
+                asyncio.get_event_loop().run_until_complete(self.http_bridge.stop())
+            except:
+                pass
+            self.http_bridge = None
+            self.console.print("[dim]HTTP Bridge closed[/dim]")
+    
     async def stop(self):
         """Stop the firewall server"""
         self.running = False
+        
+        # Stop tunnel first
+        self.stop_tunnel()
+        
         if self.server:
             self.server.close()
             await self.server.wait_closed()
@@ -321,9 +462,10 @@ class ModbusFirewall:
         self.console.print(f"\n[dim]DPI Stats: {dpi_stats}[/dim]")
 
 
-async def main():
+async def main(enable_tunnel: bool = True):
     """Main entry point"""
     firewall = ModbusFirewall()
+    firewall.tunnel_enabled = enable_tunnel
     
     # Handle shutdown
     loop = asyncio.get_event_loop()
@@ -343,7 +485,17 @@ async def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Modbus Firewall with Remote Access")
+    parser.add_argument("--tunnel", action="store_true", default=True,
+                       help="Enable localtunnel for remote access (default: enabled)")
+    parser.add_argument("--no-tunnel", dest="tunnel", action="store_false",
+                       help="Disable localtunnel (local only)")
+    
+    args = parser.parse_args()
+    
     try:
-        asyncio.run(main())
+        asyncio.run(main(enable_tunnel=args.tunnel))
     except KeyboardInterrupt:
         print("\nFirewall stopped.")

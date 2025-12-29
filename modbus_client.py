@@ -361,21 +361,44 @@ def main():
     parser = argparse.ArgumentParser(description="Modbus HMI Client")
     parser.add_argument("--host", default="127.0.0.1", help="Firewall host address")
     parser.add_argument("--port", type=int, default=502, help="Firewall port")
+    parser.add_argument("--remote", metavar="URL", help="Remote HTTP Bridge URL (e.g., https://xxx.loca.lt)")
     parser.add_argument("--test", action="store_true", help="Run automated tests")
     
     args = parser.parse_args()
     
-    hmi = ModbusHMI(host=args.host, port=args.port)
-    
-    if args.test:
-        if hmi.connect():
-            hmi.run_all_tests()
-            hmi.disconnect()
+    # Check if using remote HTTP mode
+    if args.remote:
+        from http_client import ModbusHttpClient
+        console = Console()
+        
+        console.print(f"\n[bold cyan]Connecting to Remote HTTP Bridge[/bold cyan]")
+        console.print(f"URL: {args.remote}\n")
+        
+        # Create HTTP-based HMI
+        hmi = ModbusHMI(host=args.host, port=args.port)
+        hmi.client = ModbusHttpClient(args.remote)
+        
+        if hmi.client.open():
+            console.print(f"[green]✓[/green] Connected to HTTP Bridge")
+            if args.test:
+                hmi.run_all_tests()
+            else:
+                hmi.run_interactive()
+            hmi.client.close()
+        else:
+            console.print(f"[red]✗[/red] Failed to connect to HTTP Bridge")
+            console.print(f"[dim]Error: {hmi.client.last_error_as_txt}[/dim]")
     else:
-        hmi.run_interactive()
+        # Normal TCP mode
+        hmi = ModbusHMI(host=args.host, port=args.port)
+        
+        if args.test:
+            if hmi.connect():
+                hmi.run_all_tests()
+                hmi.disconnect()
+        else:
+            hmi.run_interactive()
 
 
 if __name__ == "__main__":
     main()
-
-
