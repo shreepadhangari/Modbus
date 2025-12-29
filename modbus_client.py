@@ -243,8 +243,10 @@ class ModbusHMI:
             border_style="cyan"
         ))
         
-        if not self.connect():
-            return
+        # Only connect if client not already set (HTTP mode sets it externally)
+        if self.client is None:
+            if not self.connect():
+                return
         
         while True:
             self.console.print("\n[bold]Operations:[/bold]")
