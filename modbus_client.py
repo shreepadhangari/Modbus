@@ -107,21 +107,24 @@ class ModbusHMI:
             table.add_column("Raw", justify="right")
             table.add_column("Scaled", justify="right")
             
-            # Same scaling as server
+            # Same scaling as server (Power Plant Theme)
             reg_info = {
-                0: ("Temp SP", "°C", 10),
-                1: ("Press SP", "kPa", 10),
-                2: ("Flow SP", "L/min", 10),
-                3: ("Level SP", "%", 10),
-                4: ("Motor Spd", "%", 10),
-                5: ("Mode", "", 1),
+                0: ("Boiler_Temp_SP", "°C", 1),
+                1: ("Boiler_Press_SP", "bar", 1),
+                2: ("Steam_Temp_SP", "°C", 1),
+                3: ("Steam_Press_SP", "bar", 1),
+                4: ("Turbine_Spd_SP", "RPM", 1),
+                5: ("Gen_Load_SP", "%", 1),
+                6: ("FW_Temp_SP", "°C", 10),
+                7: ("FW_Press_SP", "bar", 10),
+                8: ("Plant_Mode", "", 1),
             }
             
             for i, val in enumerate(result):
                 addr = start_addr + i
                 if addr in reg_info:
                     name, unit, scale = reg_info[addr]
-                    if addr == 5:
+                    if addr == 8:
                         scaled = "Auto" if val == 0 else "Manual"
                     elif unit:
                         scaled = f"{val/scale:.1f} {unit}"
@@ -149,16 +152,16 @@ class ModbusHMI:
             table.add_column("Raw", justify="right")
             table.add_column("Scaled", justify="right")
             
-            # Same scaling as server
+            # Same scaling as server (Power Plant Theme)
             reg_info = {
-                0: ("Temperature", "°C", 10),
-                1: ("Pressure", "kPa", 10),
-                2: ("Flow Rate", "L/min", 10),
-                3: ("Tank Level", "%", 10),
-                4: ("Voltage", "V", 10),
-                5: ("Current", "A", 10),
-                6: ("Power", "kW", 10),
-                7: ("Frequency", "Hz", 10),
+                0: ("Feedwater_Temp", "°C", 10),
+                1: ("Feedwater_Press", "bar", 10),
+                2: ("Boiler_Temp", "°C", 1),
+                3: ("Boiler_Press", "bar", 1),
+                4: ("Steam_Temp", "°C", 1),
+                5: ("Steam_Press", "bar", 1),
+                6: ("Turbine_Speed", "RPM", 1),
+                7: ("Gen_Frequency", "Hz", 10),
             }
             
             for i, val in enumerate(result):
@@ -235,11 +238,44 @@ class ModbusHMI:
             else:
                 self.console.print("[green]✓[/green] Write was blocked by firewall (as expected)")
     
+    def write_multiple_coils(self, start_addr: int, values: list):
+        """Write multiple coils (FC 15)"""
+        self.console.print(f"\n[yellow]⚠ Attempting to write {len(values)} coils from address {start_addr}...[/yellow]")
+        self.console.print(f"[dim]Values: {values}[/dim]")
+        
+        is_allowed = self.is_operation_allowed(ModbusFunctionCode.WRITE_MULTIPLE_COILS)
+        if not is_allowed:
+            self.console.print("[dim]This operation is blocked by security policy[/dim]")
+        
+        result = self.client.write_multiple_coils(start_addr, values)
+        
+        if result:
+            self.console.print(f"[green]✓[/green] Write succeeded! Coils {start_addr}-{start_addr + len(values) - 1} updated")
+        else:
+            if is_allowed:
+                self.console.print("[red]✗[/red] Write failed (connection issue)")
+            else:
+                self.console.print("[green]✓[/green] Write was blocked by firewall (as expected)")
+    
+    def validate_address(self, addr: int, max_addr: int = 65535) -> bool:
+        """Validate Modbus address range"""
+        if addr < 0 or addr > max_addr:
+            self.console.print(f"[red]Invalid address: must be 0-{max_addr}[/red]")
+            return False
+        return True
+    
+    def validate_count(self, count: int, max_count: int = 125) -> bool:
+        """Validate Modbus read/write count"""
+        if count < 1 or count > max_count:
+            self.console.print(f"[red]Invalid count: must be 1-{max_count}[/red]")
+            return False
+        return True
+    
     def run_interactive(self):
-        """Run interactive menu"""
+        """Run interactive menu with READ and WRITE sections"""
         self.console.print(Panel(
             "[bold cyan]Modbus HMI Client[/bold cyan]\n"
-            "[dim]Interactive client for testing Modbus Firewall[/dim]",
+            "[dim]Thermal Power Plant - Interactive Control Interface[/dim]",
             border_style="cyan"
         ))
         
@@ -249,54 +285,125 @@ class ModbusHMI:
                 return
         
         while True:
-            self.console.print("\n[bold]Operations:[/bold]")
-            self.console.print(f"  [1] Read Coils (FC 01) {self.get_operation_status(ModbusFunctionCode.READ_COILS)}")
-            self.console.print(f"  [2] Read Discrete Inputs (FC 02) {self.get_operation_status(ModbusFunctionCode.READ_DISCRETE_INPUTS)}")
+            # Display menu with READ and WRITE sections
+            self.console.print("\n" + "="*50)
+            self.console.print("[bold blue]📘 READ OPERATIONS[/bold blue]")
+            self.console.print("="*50)
+            self.console.print(f"  [1] Read Coils (FC 01)             {self.get_operation_status(ModbusFunctionCode.READ_COILS)}")
+            self.console.print(f"  [2] Read Discrete Inputs (FC 02)   {self.get_operation_status(ModbusFunctionCode.READ_DISCRETE_INPUTS)}")
             self.console.print(f"  [3] Read Holding Registers (FC 03) {self.get_operation_status(ModbusFunctionCode.READ_HOLDING_REGISTERS)}")
-            self.console.print(f"  [4] Read Input Registers (FC 04) {self.get_operation_status(ModbusFunctionCode.READ_INPUT_REGISTERS)}")
-            self.console.print(f"  [5] Write Single Coil (FC 05) {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_COIL)}")
-            self.console.print(f"  [6] Write Single Register (FC 06) {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_REGISTER)}")
-            self.console.print(f"  [7] Write Multiple Registers (FC 16) {self.get_operation_status(ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS)}")
-            self.console.print("  [8] Run All Tests")
-            self.console.print("  [9] Show Security Policy")
+            self.console.print(f"  [4] Read Input Registers (FC 04)   {self.get_operation_status(ModbusFunctionCode.READ_INPUT_REGISTERS)}")
+            
+            self.console.print("\n" + "="*50)
+            self.console.print("[bold yellow]✍️  WRITE OPERATIONS[/bold yellow]")
+            self.console.print("="*50)
+            self.console.print(f"  [5] Write Coils (FC 05/15)         {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_COIL)}")
+            self.console.print(f"  [6] Write Registers (FC 06/16)     {self.get_operation_status(ModbusFunctionCode.WRITE_SINGLE_REGISTER)}")
+            
+            self.console.print("\n" + "="*50)
+            self.console.print("[bold white]⚙️  OTHER[/bold white]")
+            self.console.print("="*50)
+            self.console.print("  [7] Run All Tests")
+            self.console.print("  [8] Show Security Policy")
             self.console.print("  [0] Exit")
             
             try:
-                choice = Prompt.ask("\nSelect operation", default="0")
+                choice = Prompt.ask("\n[bold]Select operation[/bold]", default="0")
                 
+                # === READ OPERATIONS ===
                 if choice == "1":
-                    addr = IntPrompt.ask("Start address", default=0)
-                    count = IntPrompt.ask("Number of coils", default=10)
+                    self.console.print("\n[bold cyan]Read Coils (FC 01)[/bold cyan]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of coils to read", default=8)
+                    if not self.validate_count(count, 2000): continue
                     self.read_coils(addr, count)
+                    
                 elif choice == "2":
-                    addr = IntPrompt.ask("Start address", default=0)
-                    count = IntPrompt.ask("Number of inputs", default=10)
+                    self.console.print("\n[bold cyan]Read Discrete Inputs (FC 02)[/bold cyan]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of discrete inputs to read", default=8)
+                    if not self.validate_count(count, 2000): continue
                     self.read_discrete_inputs(addr, count)
+                    
                 elif choice == "3":
-                    addr = IntPrompt.ask("Start address", default=0)
-                    count = IntPrompt.ask("Number of registers", default=10)
+                    self.console.print("\n[bold cyan]Read Holding Registers (FC 03)[/bold cyan]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of holding registers to read", default=9)
+                    if not self.validate_count(count, 125): continue
                     self.read_holding_registers(addr, count)
+                    
                 elif choice == "4":
-                    addr = IntPrompt.ask("Start address", default=0)
-                    count = IntPrompt.ask("Number of registers", default=10)
+                    self.console.print("\n[bold cyan]Read Input Registers (FC 04)[/bold cyan]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of input registers to read", default=8)
+                    if not self.validate_count(count, 125): continue
                     self.read_input_registers(addr, count)
+                
+                # === WRITE OPERATIONS ===
                 elif choice == "5":
-                    addr = IntPrompt.ask("Coil address", default=0)
-                    val_str = Prompt.ask("Value (true/false)", default="true")
-                    val = val_str.lower() in ("true", "1", "yes", "on")
-                    self.write_single_coil(addr, val)
+                    self.console.print("\n[bold yellow]Write Coils (FC 05/15)[/bold yellow]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of coils to write", default=1)
+                    if not self.validate_count(count, 1968): continue
+                    
+                    if count == 1:
+                        # Single coil write (FC 05)
+                        val_str = Prompt.ask("  Value (ON/OFF or 1/0)", default="ON")
+                        val = val_str.upper() in ("ON", "TRUE", "1", "YES")
+                        self.write_single_coil(addr, val)
+                    else:
+                        # Multiple coil write (FC 15)
+                        self.console.print(f"  [dim]Enter {count} values (ON/OFF or 1/0), comma-separated:[/dim]")
+                        val_str = Prompt.ask("  Values", default=",".join(["OFF"]*count))
+                        values = []
+                        for v in val_str.split(","):
+                            v = v.strip().upper()
+                            values.append(v in ("ON", "TRUE", "1", "YES"))
+                        if len(values) != count:
+                            self.console.print(f"[red]Expected {count} values, got {len(values)}[/red]")
+                            continue
+                        self.write_multiple_coils(addr, values)
+                    
                 elif choice == "6":
-                    addr = IntPrompt.ask("Register address", default=0)
-                    val = IntPrompt.ask("Value (0-65535)", default=0)
-                    self.write_single_register(addr, val)
+                    self.console.print("\n[bold yellow]Write Registers (FC 06/16)[/bold yellow]")
+                    addr = IntPrompt.ask("  Start address", default=0)
+                    if not self.validate_address(addr): continue
+                    count = IntPrompt.ask("  Number of registers to write", default=1)
+                    if not self.validate_count(count, 123): continue
+                    
+                    if count == 1:
+                        # Single register write (FC 06)
+                        val = IntPrompt.ask("  Value (0-65535)", default=0)
+                        if val < 0 or val > 65535:
+                            self.console.print("[red]Value must be 0-65535[/red]")
+                            continue
+                        self.write_single_register(addr, val)
+                    else:
+                        # Multiple register write (FC 16)
+                        self.console.print(f"  [dim]Enter {count} values (0-65535), comma-separated:[/dim]")
+                        val_str = Prompt.ask("  Values", default=",".join(["0"]*count))
+                        try:
+                            values = [int(v.strip()) for v in val_str.split(",")]
+                            if len(values) != count:
+                                self.console.print(f"[red]Expected {count} values, got {len(values)}[/red]")
+                                continue
+                            if any(v < 0 or v > 65535 for v in values):
+                                self.console.print("[red]All values must be 0-65535[/red]")
+                                continue
+                            self.write_multiple_registers(addr, values)
+                        except ValueError:
+                            self.console.print("[red]Invalid number format[/red]")
+                            continue
+                
+                # === OTHER ===
                 elif choice == "7":
-                    addr = IntPrompt.ask("Start address", default=0)
-                    val_str = Prompt.ask("Values (comma-separated)", default="100,200,300")
-                    values = [int(v.strip()) for v in val_str.split(",")]
-                    self.write_multiple_registers(addr, values)
-                elif choice == "8":
                     self.run_all_tests()
-                elif choice == "9":
+                elif choice == "8":
                     self.show_security_policy()
                 elif choice == "0":
                     break

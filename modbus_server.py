@@ -72,62 +72,95 @@ class SimulatedPLC:
         self.prev_coils = None
         self.prev_holding = None
         
-        # Coil and register names for display
+        # Coil and register names for display (Thermal Power Plant)
         self.coil_names = {
-            0: "Pump 1", 1: "Pump 2", 2: "Valve 1", 3: "Valve 2", 
-            4: "Motor 1", 5: "Motor 2", 6: "Heater", 7: "Cooler",
-            8: "Alarm", 9: "Light"
+            0: "Fuel_Motor",
+            1: "Feedwater_Pump",
+            2: "Steam_Valve",
+            3: "Air_Fan",
+            4: "Turbine_Enable",
+            5: "Generator_Connect",
+            6: "Plant_Run",
+            7: "Alarm_Enable",
         }
         
         self.discrete_names = {
-            0: "Hi Level", 1: "Lo Level", 2: "Hi Pressure", 3: "Lo Pressure",
-            4: "Door Open", 5: "E-Stop OK", 6: "Run Mode", 7: "Fault"
+            0: "Boiler_Lvl_Hi",
+            1: "Boiler_Lvl_Lo",
+            2: "Boiler_Press_Hi",
+            3: "Boiler_Press_Lo",
+            4: "Boiler_Temp_Hi",
+            5: "Turbine_Trip",
+            6: "E-Stop_OK",
+            7: "Fault_Active",
         }
         
+        # Input registers: (Name, Unit, Scale factor)
+        # Raw value / Scale = Scaled value
         self.input_reg_names = {
-            0: ("Temperature", "°C", 10),
-            1: ("Pressure", "kPa", 10),
-            2: ("Flow Rate", "L/min", 10),
-            3: ("Tank Level", "%", 10),
-            4: ("Voltage", "V", 10),
-            5: ("Current", "A", 10),
-            6: ("Power", "kW", 10),
-            7: ("Frequency", "Hz", 10),
+            0: ("Feedwater_Temp", "°C", 10),      # 320 -> 32.0 °C
+            1: ("Feedwater_Press", "bar", 10),   # 650 -> 65.0 bar
+            2: ("Boiler_Temp", "°C", 1),         # 850 -> 850 °C
+            3: ("Boiler_Press", "bar", 1),       # 160 -> 160 bar
+            4: ("Steam_Temp", "°C", 1),          # 540 -> 540 °C
+            5: ("Steam_Press", "bar", 1),        # 150 -> 150 bar
+            6: ("Turbine_Speed", "RPM", 1),      # 3000 -> 3000 RPM
+            7: ("Gen_Frequency", "Hz", 10),      # 500 -> 50.0 Hz
         }
         
+        # Holding registers: (Name, Unit, Scale factor)
         self.holding_reg_names = {
-            0: ("Temp SP", "°C", 10),
-            1: ("Press SP", "kPa", 10),
-            2: ("Flow SP", "L/min", 10),
-            3: ("Level SP", "%", 10),
-            4: ("Motor Spd", "%", 10),
-            5: ("Mode", "", 1),
+            0: ("Boiler_Temp_SP", "°C", 1),      # 850 -> 850 °C
+            1: ("Boiler_Press_SP", "bar", 1),   # 160 -> 160 bar
+            2: ("Steam_Temp_SP", "°C", 1),       # 540 -> 540 °C
+            3: ("Steam_Press_SP", "bar", 1),    # 150 -> 150 bar
+            4: ("Turbine_Spd_SP", "RPM", 1),    # 3000 -> 3000 RPM
+            5: ("Gen_Load_SP", "%", 1),          # 80 -> 80%
+            6: ("FW_Temp_SP", "°C", 10),         # 320 -> 32.0 °C
+            7: ("FW_Press_SP", "bar", 10),      # 650 -> 65.0 bar
+            8: ("Plant_Mode", "", 1),            # 0=Auto, 1=Manual
         }
         
     def initialize_registers(self):
-        """Initialize register map with simulated values"""
-        # Coils (0x): Digital outputs
+        """Initialize register map with thermal power plant values"""
+        # Coils (0x): Digital outputs - Power plant controls
         initial_coils = [False] * self.config.num_coils
-        initial_coils[0] = True   # Pump 1 ON
-        initial_coils[2] = True   # Valve 1 OPEN
+        initial_coils[0] = True   # Fuel motor running
+        initial_coils[1] = True   # Feedwater pump running
+        initial_coils[3] = True   # Air fan running
+        initial_coils[6] = True   # Plant run command ON
         self.data_bank.set_coils(0, initial_coils)
         
-        # Discrete Inputs (1x): Digital sensors
+        # Discrete Inputs (1x): Protection status
         initial_discrete = [False] * self.config.num_discrete_inputs
-        initial_discrete[0] = True   # High level sensor
-        initial_discrete[5] = True   # Emergency stop OK
+        initial_discrete[6] = True   # Emergency stop OK
         self.data_bank.set_discrete_inputs(0, initial_discrete)
         
-        # Input Registers (3x): Analog sensors
+        # Input Registers (3x): Process measurements
         initial_input_regs = [
-            250, 1013, 500, 750, 480, 100, 50, 600
+            320,   # 0: Feedwater Temp (32.0 °C)
+            650,   # 1: Feedwater Pressure (65.0 bar)
+            850,   # 2: Boiler Temp (850 °C)
+            160,   # 3: Boiler Pressure (160 bar)
+            540,   # 4: Steam Temp (540 °C)
+            150,   # 5: Steam Pressure (150 bar)
+            3000,  # 6: Turbine Speed (3000 RPM)
+            500,   # 7: Generator Frequency (50.0 Hz)
         ] + [0] * (self.config.num_input_registers - 8)
         self.data_bank.set_input_registers(0, initial_input_regs)
         
         # Holding Registers (4x): Setpoints
         initial_holding_regs = [
-            300, 1000, 600, 800, 100, 0
-        ] + [0] * (self.config.num_holding_registers - 6)
+            850,   # 0: Boiler Temp SP (850 °C)
+            160,   # 1: Boiler Pressure SP (160 bar)
+            540,   # 2: Steam Temp SP (540 °C)
+            150,   # 3: Steam Pressure SP (150 bar)
+            3000,  # 4: Turbine Speed SP (3000 RPM)
+            80,    # 5: Generator Load SP (80%)
+            320,   # 6: Feedwater Temp SP (32.0 °C)
+            650,   # 7: Feedwater Pressure SP (65.0 bar)
+            0,     # 8: Plant Mode (0=Auto)
+        ] + [0] * (self.config.num_holding_registers - 9)
         self.data_bank.set_holding_registers(0, initial_holding_regs)
         
         # Initialize previous values for change detection
@@ -152,16 +185,20 @@ class SimulatedPLC:
                 self.prev_holding[i] = current_holding[i]
     
     def simulate_process(self):
-        """Background thread to simulate dynamic process values"""
+        """Background thread to simulate dynamic power plant process values"""
         while self.running:
             try:
                 current = self.data_bank.get_input_registers(0, 8)
                 if current:
-                    # Simulate fluctuations
-                    current[0] = max(200, min(350, current[0] + random.randint(-5, 5)))
-                    current[1] = max(900, min(1100, current[1] + random.randint(-10, 10)))
-                    current[2] = max(0, min(1000, current[2] + random.randint(-20, 20)))
-                    current[3] = max(0, min(1000, current[3] + random.randint(-5, 5)))
+                    # Simulate realistic power plant fluctuations
+                    current[0] = max(300, min(340, current[0] + random.randint(-2, 2)))   # Feedwater Temp (30-34°C)
+                    current[1] = max(630, min(670, current[1] + random.randint(-5, 5)))   # Feedwater Press (63-67 bar)
+                    current[2] = max(840, min(860, current[2] + random.randint(-3, 3)))   # Boiler Temp (840-860°C)
+                    current[3] = max(155, min(165, current[3] + random.randint(-1, 1)))   # Boiler Press (155-165 bar)
+                    current[4] = max(535, min(545, current[4] + random.randint(-2, 2)))   # Steam Temp (535-545°C)
+                    current[5] = max(145, min(155, current[5] + random.randint(-1, 1)))   # Steam Press (145-155 bar)
+                    current[6] = max(2990, min(3010, current[6] + random.randint(-5, 5))) # Turbine Speed (~3000 RPM)
+                    current[7] = max(498, min(502, current[7] + random.randint(-1, 1)))   # Gen Freq (49.8-50.2 Hz)
                     # Don't use set_ method to avoid marking as "active" from simulation
                     DataBank.set_input_registers(self.data_bank, 0, current)
                 

@@ -51,36 +51,39 @@ class NetworkConfig:
 
 @dataclass
 class SecurityPolicy:
-    """Security policy configuration"""
-    # Whitelist: Function codes that are allowed
+    """Security policy configuration for Modbus Firewall"""
+    
+    # Whitelist: Function codes that are ALLOWED
     allowed_function_codes: Set[int] = field(default_factory=lambda: {
+        # Read operations (always allowed)
         ModbusFunctionCode.READ_COILS,
         ModbusFunctionCode.READ_DISCRETE_INPUTS,
         ModbusFunctionCode.READ_HOLDING_REGISTERS,
         ModbusFunctionCode.READ_INPUT_REGISTERS,
+        # Write register operations (allowed)
         ModbusFunctionCode.WRITE_SINGLE_REGISTER,
+        ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
     })
     
-    # Blacklist: Function codes that are explicitly blocked
+    # Blacklist: Function codes that are BLOCKED
     blocked_function_codes: Set[int] = field(default_factory=lambda: {
-        
+        # Write coil operations (blocked - safety critical)
         ModbusFunctionCode.WRITE_SINGLE_COIL,
         ModbusFunctionCode.WRITE_MULTIPLE_COILS,
-        ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
+        # Complex operations (blocked)
         ModbusFunctionCode.READ_WRITE_MULTIPLE_REGISTERS,
     })
     
-    # IP-based whitelist for write operations (empty = all blocked)
+    # IP-based whitelist for write operations (empty = use function code policy)
     write_allowed_ips: Set[str] = field(default_factory=set)
     
-    # Time-based policy (maintenance window)
+    # Maintenance mode bypasses all blocking
     maintenance_mode: bool = False
     
     # Rate limiting (requests per second per client)
     rate_limit: int = 100
     
-    # Register-level policies (register_address -> allowed operations)
-    # Format: {register_address: set of allowed function codes}
+    # Register-level policies: {register_address: set of allowed function codes}
     register_policies: Dict[int, Set[int]] = field(default_factory=dict)
 
 
