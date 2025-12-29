@@ -333,6 +333,10 @@ class ModbusFirewall:
             modbus_port=self.config.network.firewall_port,
             http_port=self.http_bridge_port
         )
+        
+        # Generate admin password for remote access
+        admin_password = self.http_bridge.generate_admin_password()
+        
         await self.http_bridge.start()
         
         # Now start localtunnel pointing to the HTTP bridge port
@@ -388,14 +392,18 @@ class ModbusFirewall:
                     break
             
             if self.tunnel_url:
-                # Extract just the hostname for client connection
+                # Display remote access panel with URL and password
                 self.console.print(Panel(
-                    f"[bold green]Remote Access URL[/bold green]\n\n"
+                    f"[bold green]🌐 Remote Access URL[/bold green]\n"
                     f"[bold cyan]{self.tunnel_url}[/bold cyan]\n\n"
-                    f"[dim]Share this URL with remote clients.\n"
-                    f"They should connect using:[/dim]\n\n"
-                    f"[yellow]python modbus_client.py --remote {self.tunnel_url}[/yellow]",
-                    title="🌐 LocalTunnel Active (HTTP Bridge)",
+                    f"[bold yellow]🔐 Admin Password[/bold yellow]\n"
+                    f"[bold white]{admin_password}[/bold white]\n\n"
+                    f"[dim]─────────────────────────────────────[/dim]\n"
+                    f"[dim]Remote clients connect with:[/dim]\n"
+                    f"[yellow]python modbus_client.py --remote {self.tunnel_url}[/yellow]\n\n"
+                    f"[dim]• Non-admin: Read-only access (no password)[/dim]\n"
+                    f"[dim]• Admin: Full access (requires password above)[/dim]",
+                    title="🔌 LocalTunnel Active",
                     border_style="green"
                 ))
             else:

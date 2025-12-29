@@ -23,20 +23,52 @@ class ModbusHMI:
         self.host = host
         self.port = port
         self.client = None
-        self.security_policy = DEFAULT_CONFIG.security
+        
+        # Connection state (set by main())
+        self.is_remote = False
+        self.is_admin = True
+        self.access_level = "LOCAL"
+        
+        # Security policies from config
+        self.local_policy = DEFAULT_CONFIG.local_security
+        self.remote_policy = DEFAULT_CONFIG.remote_security
+    
+    def get_active_policy_allowed(self) -> set:
+        """Get the allowed function codes based on current connection mode"""
+        if not self.is_remote:
+            # Local connection - use local policy
+            return self.local_policy.allowed_function_codes
+        else:
+            # Remote connection
+            if self.is_admin:
+                return self.remote_policy.admin_function_codes
+            else:
+                return self.remote_policy.readonly_function_codes
+    
+    def get_active_policy_blocked(self) -> set:
+        """Get the blocked function codes based on current connection mode"""
+        if not self.is_remote:
+            return self.local_policy.blocked_function_codes
+        else:
+            return self.remote_policy.blocked_function_codes
     
     def get_operation_status(self, function_code: int) -> str:
-        """Get the allowed/blocked status for a function code based on security policy"""
-        if function_code in self.security_policy.allowed_function_codes:
-            return "[green]✓ Allowed[/green]"
-        elif function_code in self.security_policy.blocked_function_codes:
+        """Get the allowed/blocked status for a function code based on active policy"""
+        allowed = self.get_active_policy_allowed()
+        blocked = self.get_active_policy_blocked()
+        
+        if function_code in blocked:
             return "[red]✗ Blocked[/red]"
+        elif function_code in allowed:
+            return "[green]✓ Allowed[/green]"
         else:
             return "[yellow]? Unknown[/yellow]"
     
     def is_operation_allowed(self, function_code: int) -> bool:
-        """Check if a function code is allowed by security policy"""
-        return function_code in self.security_policy.allowed_function_codes
+        """Check if a function code is allowed by active security policy"""
+        allowed = self.get_active_policy_allowed()
+        blocked = self.get_active_policy_blocked()
+        return function_code in allowed and function_code not in blocked
         
     def connect(self) -> bool:
         """Connect to the Modbus server (through firewall)"""
@@ -418,21 +450,34 @@ class ModbusHMI:
         self.disconnect()
     
     def show_security_policy(self):
-        """Display current security policy configuration"""
+        """Display current security policy configuration based on connection mode"""
         from config import get_function_code_name
         
-        lines = ["[bold cyan]Current Security Policy[/bold cyan]\n"]
+        # Determine policy type
+        if not self.is_remote:
+            policy_name = "Local Security Policy"
+            policy_desc = "Full access for local connections"
+        elif self.is_admin:
+            policy_name = "Remote Admin Security Policy"
+            policy_desc = "Authenticated admin access"
+        else:
+            policy_name = "Remote Read-Only Policy"
+            policy_desc = "Non-authenticated remote access"
+        
+        lines = [f"[bold cyan]{policy_name}[/bold cyan]"]
+        lines.append(f"[dim]{policy_desc}[/dim]\n")
+        lines.append(f"[dim]Access Level: {self.access_level}[/dim]\n")
+        
+        allowed = self.get_active_policy_allowed()
+        blocked = self.get_active_policy_blocked()
         
         lines.append("[green]Allowed Function Codes:[/green]")
-        for fc in sorted(self.security_policy.allowed_function_codes):
+        for fc in sorted(allowed):
             lines.append(f"  • 0x{fc:02X}: {get_function_code_name(fc)}")
         
         lines.append("\n[red]Blocked Function Codes:[/red]")
-        for fc in sorted(self.security_policy.blocked_function_codes):
+        for fc in sorted(blocked):
             lines.append(f"  • 0x{fc:02X}: {get_function_code_name(fc)}")
-        
-        lines.append(f"\n[yellow]Write-Allowed IPs:[/yellow] {self.security_policy.write_allowed_ips or 'None'}")
-        lines.append(f"[yellow]Rate Limit:[/yellow] {self.security_policy.rate_limit} req/s per client")
         
         self.console.print(Panel("\n".join(lines), border_style="cyan"))
     
@@ -480,26 +525,107 @@ def main():
         from http_client import ModbusHttpClient
         console = Console()
         
-        console.print(f"\n[bold cyan]Connecting to Remote HTTP Bridge[/bold cyan]")
-        console.print(f"URL: {args.remote}\n")
+        console.print(Panel(
+            "[bold cyan]Remote Connection Mode[/bold cyan]\n"
+            f"[dim]URL: {args.remote}[/dim]",
+            border_style="cyan"
+        ))
         
-        # Create HTTP-based HMI
-        hmi = ModbusHMI(host=args.host, port=args.port)
-        hmi.client = ModbusHttpClient(args.remote)
+        # Create HTTP client
+        http_client = ModbusHttpClient(args.remote)
         
-        if hmi.client.open():
-            console.print(f"[green]✓[/green] Connected to HTTP Bridge")
-            if args.test:
-                hmi.run_all_tests()
-            else:
-                hmi.run_interactive()
-            hmi.client.close()
-        else:
+        if not http_client.open():
             console.print(f"[red]✗[/red] Failed to connect to HTTP Bridge")
-            console.print(f"[dim]Error: {hmi.client.last_error_as_txt}[/dim]")
-    else:
-        # Normal TCP mode
+            console.print(f"[dim]Error: {http_client.last_error_as_txt}[/dim]")
+            return
+        
+        console.print(f"[green]✓[/green] Connected to HTTP Bridge\n")
+        
+        # Ask if user wants admin access
+        admin_choice = Prompt.ask(
+            "[bold yellow]Do you want to connect as Admin?[/bold yellow]",
+            choices=["yes", "no"],
+            default="no"
+        )
+        
+        is_admin = False
+        
+        if admin_choice.lower() == "yes":
+            # Admin authentication with 3 attempts
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                password = Prompt.ask(
+                    f"[yellow]Enter Admin Password[/yellow] (Attempt {attempt}/{max_attempts})",
+                    password=True
+                )
+                
+                if http_client.authenticate(password):
+                    console.print("[green]✓[/green] [bold]Authentication successful! Admin mode enabled.[/bold]")
+                    is_admin = True
+                    break
+                else:
+                    remaining = max_attempts - attempt
+                    if remaining > 0:
+                        console.print(f"[red]✗[/red] Invalid password. {remaining} attempts remaining.")
+                        retry = Prompt.ask(
+                            "  [dim]Options:[/dim]",
+                            choices=["retry", "readonly"],
+                            default="retry"
+                        )
+                        if retry == "readonly":
+                            console.print("[yellow]ℹ[/yellow] Connecting in Read-Only mode...")
+                            http_client.create_session()
+                            break
+                    else:
+                        console.print("[red]✗[/red] All attempts failed. Connecting in Read-Only mode.")
+                        http_client.create_session()
+        else:
+            # Read-only mode
+            console.print("[yellow]ℹ[/yellow] Connecting in Read-Only mode...")
+            http_client.create_session()
+        
+        # Create HMI with HTTP client
         hmi = ModbusHMI(host=args.host, port=args.port)
+        hmi.client = http_client
+        
+        # Store access level for UI
+        hmi.is_remote = True
+        hmi.is_admin = is_admin
+        hmi.access_level = "ADMIN" if is_admin else "READ-ONLY"
+        
+        # Show access level banner
+        if is_admin:
+            console.print(Panel(
+                "[bold green]✓ ADMIN MODE[/bold green]\n"
+                "[dim]Full read/write access enabled[/dim]",
+                border_style="green"
+            ))
+        else:
+            console.print(Panel(
+                "[bold yellow]🔒 READ-ONLY MODE[/bold yellow]\n"
+                "[dim]Write operations will be blocked[/dim]",
+                border_style="yellow"
+            ))
+        
+        if args.test:
+            hmi.run_all_tests()
+        else:
+            hmi.run_interactive()
+        
+        http_client.close()
+    else:
+        # Normal TCP mode (local connection)
+        console = Console()
+        console.print(Panel(
+            "[bold green]Local Connection Mode[/bold green]\n"
+            "[dim]Full access - no authentication required[/dim]",
+            border_style="green"
+        ))
+        
+        hmi = ModbusHMI(host=args.host, port=args.port)
+        hmi.is_remote = False
+        hmi.is_admin = True
+        hmi.access_level = "LOCAL"
         
         if args.test:
             if hmi.connect():

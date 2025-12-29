@@ -1,5 +1,6 @@
 .venv
 __pycache__
 .log
-.modbus_firewall.log
-.security_alerts.log
+modbus_firewall.log
+security_alerts.log
+newmodbus/

@@ -268,10 +268,4 @@ class SecurityPolicyEngine:
         for fc in sorted(self.config.blocked_function_codes):
             lines.append(f"  - 0x{fc:02X}: {get_function_code_name(fc)}")
         
-        lines.append("")
-        lines.append(f"Write-Allowed IPs: {self.config.write_allowed_ips or 'None'}")
-        lines.append(f"Maintenance Mode: {'Active' if self.maintenance_window.is_active() else 'Inactive'}")
-        lines.append(f"Rate Limit: {self.config.rate_limit} req/s per client")
-        lines.append(f"Bypass Mode: {'ENABLED' if self.bypass_mode else 'Disabled'}")
-        
         return "\n".join(lines)

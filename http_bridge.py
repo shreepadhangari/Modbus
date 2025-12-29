@@ -1,21 +1,29 @@
 """
-Modbus HTTP Bridge
+Modbus HTTP Bridge with Authentication
 
 HTTP server that bridges Modbus TCP traffic over HTTP for use with LocalTunnel.
-Remote clients send Modbus frames as HTTP POST requests, and receive responses.
+Includes role-based access control with session tokens for remote admin access.
 """
 
 import asyncio
 import base64
+import secrets
+import hashlib
+import hmac
+import time
 from aiohttp import web
-from typing import Optional
+from typing import Optional, Dict
 from rich.console import Console
+from config import DEFAULT_CONFIG
 
 console = Console()
 
+# Session token expiry (in seconds)
+SESSION_EXPIRY = 30 * 60  # 30 minutes
+
 
 class ModbusHttpBridge:
-    """HTTP bridge that forwards Modbus requests to a local Modbus server"""
+    """HTTP bridge with authentication for Modbus over HTTP"""
     
     def __init__(self, modbus_host: str = "127.0.0.1", modbus_port: int = 502, http_port: int = 8080):
         self.modbus_host = modbus_host
@@ -23,11 +31,58 @@ class ModbusHttpBridge:
         self.http_port = http_port
         self.app = web.Application()
         self.runner: Optional[web.AppRunner] = None
+        
+        # Authentication
+        self.admin_password: Optional[str] = None
+        self.sessions: Dict[str, Dict] = {}  # token -> {created_at, is_admin}
+        self.secret_key = secrets.token_bytes(32)  # For signing tokens
+        
         self.setup_routes()
+    
+    def generate_admin_password(self) -> str:
+        """Generate a random admin password"""
+        length = DEFAULT_CONFIG.auth.admin_password_length
+        # Generate alphanumeric password
+        chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+        self.admin_password = ''.join(secrets.choice(chars) for _ in range(length))
+        return self.admin_password
+    
+    def create_session(self, is_admin: bool = False) -> str:
+        """Create a new session token"""
+        token = secrets.token_urlsafe(32)
+        self.sessions[token] = {
+            'created_at': time.time(),
+            'is_admin': is_admin
+        }
+        return token
+    
+    def validate_session(self, token: str) -> Dict:
+        """Validate session token and return session info"""
+        if not token or token not in self.sessions:
+            return {'valid': False, 'is_admin': False}
+        
+        session = self.sessions[token]
+        age = time.time() - session['created_at']
+        
+        if age > SESSION_EXPIRY:
+            del self.sessions[token]
+            return {'valid': False, 'is_admin': False, 'expired': True}
+        
+        return {'valid': True, 'is_admin': session['is_admin']}
+    
+    def is_write_operation(self, modbus_frame: bytes) -> bool:
+        """Check if the Modbus frame is a write operation"""
+        if len(modbus_frame) < 8:
+            return False
+        function_code = modbus_frame[7]
+        write_codes = {0x05, 0x06, 0x0F, 0x10, 0x17}  # FC 5,6,15,16,23
+        return function_code in write_codes
     
     def setup_routes(self):
         """Setup HTTP routes"""
         self.app.router.add_post('/modbus', self.handle_modbus_request)
+        self.app.router.add_post('/auth', self.handle_auth)
+        self.app.router.add_post('/session', self.handle_create_session)
         self.app.router.add_get('/health', self.handle_health)
         self.app.router.add_get('/', self.handle_index)
     
@@ -39,19 +94,19 @@ class ModbusHttpBridge:
         <head><title>Modbus HTTP Bridge</title></head>
         <body style="font-family: Arial; padding: 20px; background: #1a1a2e; color: #eee;">
             <h1>🔌 Modbus HTTP Bridge</h1>
-            <p>This server bridges Modbus TCP traffic over HTTP.</p>
+            <p>Secure bridge for Modbus TCP over HTTP with role-based access.</p>
+            <h2>🔐 Access Levels:</h2>
+            <ul>
+                <li><strong>Read-Only</strong>: No authentication required</li>
+                <li><strong>Admin</strong>: Password required for write operations</li>
+            </ul>
             <h2>API Endpoints:</h2>
             <ul>
-                <li><code>POST /modbus</code> - Send Modbus frame (base64 encoded in JSON)</li>
+                <li><code>POST /session</code> - Create read-only session</li>
+                <li><code>POST /auth</code> - Authenticate as admin</li>
+                <li><code>POST /modbus</code> - Send Modbus frame</li>
                 <li><code>GET /health</code> - Health check</li>
             </ul>
-            <h2>Usage:</h2>
-            <pre>
-POST /modbus
-Content-Type: application/json
-
-{"data": "&lt;base64-encoded-modbus-frame&gt;"}
-            </pre>
             <p style="color: #0f0;">✓ Bridge is running</p>
         </body>
         </html>
@@ -60,11 +115,54 @@ Content-Type: application/json
     
     async def handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint"""
-        return web.json_response({"status": "ok", "modbus_target": f"{self.modbus_host}:{self.modbus_port}"})
+        return web.json_response({
+            "status": "ok",
+            "modbus_target": f"{self.modbus_host}:{self.modbus_port}",
+            "auth_required": True
+        })
+    
+    async def handle_create_session(self, request: web.Request) -> web.Response:
+        """Create a read-only session token"""
+        token = self.create_session(is_admin=False)
+        return web.json_response({
+            "token": token,
+            "access_level": "readonly",
+            "expires_in": SESSION_EXPIRY
+        })
+    
+    async def handle_auth(self, request: web.Request) -> web.Response:
+        """Authenticate as admin with password"""
+        try:
+            data = await request.json()
+            password = data.get('password', '')
+            
+            if not self.admin_password:
+                return web.json_response({
+                    "error": "Admin access not configured"
+                }, status=503)
+            
+            if password == self.admin_password:
+                token = self.create_session(is_admin=True)
+                return web.json_response({
+                    "token": token,
+                    "access_level": "admin",
+                    "expires_in": SESSION_EXPIRY
+                })
+            else:
+                return web.json_response({
+                    "error": "Invalid password"
+                }, status=401)
+                
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=400)
     
     async def handle_modbus_request(self, request: web.Request) -> web.Response:
-        """Handle Modbus request forwarding"""
+        """Handle Modbus request with access control"""
         try:
+            # Get session token from header
+            token = request.headers.get('X-Session-Token', '')
+            session = self.validate_session(token)
+            
             # Parse request
             data = await request.json()
             
@@ -77,6 +175,22 @@ Content-Type: application/json
             except Exception as e:
                 return web.json_response({"error": f"Invalid base64: {e}"}, status=400)
             
+            # Access control check
+            is_write = self.is_write_operation(modbus_frame)
+            
+            if is_write:
+                if not session['valid']:
+                    return web.json_response({
+                        "error": "Session required for write operations",
+                        "code": "NO_SESSION"
+                    }, status=401)
+                
+                if not session['is_admin']:
+                    return web.json_response({
+                        "error": "Admin access required for write operations",
+                        "code": "READ_ONLY"
+                    }, status=403)
+            
             # Forward to Modbus server
             try:
                 reader, writer = await asyncio.wait_for(
@@ -84,21 +198,18 @@ Content-Type: application/json
                     timeout=5.0
                 )
                 
-                # Send request
                 writer.write(modbus_frame)
                 await writer.drain()
                 
-                # Read response
                 response = await asyncio.wait_for(reader.read(260), timeout=5.0)
                 
-                # Close connection
                 writer.close()
                 await writer.wait_closed()
                 
-                # Return response as base64
                 return web.json_response({
                     "data": base64.b64encode(response).decode('ascii'),
-                    "length": len(response)
+                    "length": len(response),
+                    "access_level": "admin" if session.get('is_admin') else "readonly"
                 })
                 
             except asyncio.TimeoutError:
@@ -128,6 +239,9 @@ Content-Type: application/json
 async def main():
     """Standalone HTTP bridge for testing"""
     bridge = ModbusHttpBridge(modbus_host="127.0.0.1", modbus_port=502, http_port=8080)
+    bridge.generate_admin_password()
+    console.print(f"[bold yellow]Admin Password: {bridge.admin_password}[/bold yellow]")
+    
     await bridge.start()
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     

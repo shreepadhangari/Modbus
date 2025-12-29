@@ -1,8 +1,8 @@
 """
-Modbus HTTP Client Wrapper
+Modbus HTTP Client with Authentication
 
 Wraps Modbus operations in HTTP requests for use with the HTTP Bridge.
-This allows connecting to a remote Modbus server through LocalTunnel.
+Supports session tokens and admin authentication for write access.
 """
 
 import requests
@@ -16,7 +16,7 @@ console = Console()
 
 class ModbusHttpClient:
     """
-    HTTP-based Modbus client that communicates with the HTTP Bridge.
+    HTTP-based Modbus client with authentication support.
     Wraps pyModbusTCP-like API but sends requests over HTTP.
     """
     
@@ -34,6 +34,60 @@ class ModbusHttpClient:
         self.unit_id = 1
         self.last_error = 0
         self.last_error_as_txt = ""
+        
+        # Authentication
+        self.session_token: Optional[str] = None
+        self.is_admin = False
+        self.access_level = "none"
+    
+    def create_session(self) -> bool:
+        """Create a read-only session"""
+        try:
+            response = requests.post(
+                f"{self.url}/session",
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.session_token = data.get('token')
+                self.access_level = data.get('access_level', 'readonly')
+                self.is_admin = False
+                return True
+            else:
+                self.last_error = response.status_code
+                self.last_error_as_txt = "Failed to create session"
+                return False
+        except Exception as e:
+            self.last_error = 4
+            self.last_error_as_txt = str(e)
+            return False
+    
+    def authenticate(self, password: str) -> bool:
+        """Authenticate as admin with password"""
+        try:
+            response = requests.post(
+                f"{self.url}/auth",
+                json={"password": password},
+                timeout=self.timeout
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.session_token = data.get('token')
+                self.access_level = data.get('access_level', 'admin')
+                self.is_admin = True
+                return True
+            elif response.status_code == 401:
+                self.last_error = 401
+                self.last_error_as_txt = "Invalid password"
+                return False
+            else:
+                self.last_error = response.status_code
+                self.last_error_as_txt = "Authentication failed"
+                return False
+        except Exception as e:
+            self.last_error = 4
+            self.last_error_as_txt = str(e)
+            return False
     
     def _next_transaction_id(self) -> int:
         """Get next transaction ID"""
@@ -55,12 +109,17 @@ class ModbusHttpClient:
             # Encode frame as base64
             payload = {"data": base64.b64encode(frame).decode('ascii')}
             
+            # Add session token header
+            headers = {"Content-Type": "application/json"}
+            if self.session_token:
+                headers["X-Session-Token"] = self.session_token
+            
             # Send to bridge
             response = requests.post(
                 f"{self.url}/modbus",
                 json=payload,
                 timeout=self.timeout,
-                headers={"Content-Type": "application/json"}
+                headers=headers
             )
             
             if response.status_code == 200:
@@ -71,6 +130,16 @@ class ModbusHttpClient:
                     self.last_error = 1
                     self.last_error_as_txt = data.get('error', 'Unknown error')
                     return None
+            elif response.status_code == 401:
+                self.last_error = 401
+                data = response.json()
+                self.last_error_as_txt = data.get('error', 'Session required')
+                return None
+            elif response.status_code == 403:
+                self.last_error = 403
+                data = response.json()
+                self.last_error_as_txt = data.get('error', 'Admin access required')
+                return None
             else:
                 self.last_error = response.status_code
                 self.last_error_as_txt = f"HTTP {response.status_code}"
@@ -94,8 +163,6 @@ class ModbusHttpClient:
         if not response or len(response) < 9:
             return None
         
-        # Parse header
-        # tx_id, proto_id, length, unit_id, fc = struct.unpack('>HHHBB', response[:8])
         fc = response[7]
         
         # Check for exception
@@ -113,14 +180,12 @@ class ModbusHttpClient:
         data = response[9:9+byte_count]
         
         if expected_fc in [1, 2]:  # Coils or Discrete Inputs
-            # Unpack bits
             result = []
             for byte in data:
                 for bit in range(8):
                     result.append(bool(byte & (1 << bit)))
             return result
         else:  # Registers
-            # Unpack 16-bit values
             result = []
             for i in range(0, len(data), 2):
                 if i + 1 < len(data):
@@ -136,8 +201,10 @@ class ModbusHttpClient:
             return False
     
     def close(self) -> None:
-        """No-op for HTTP client"""
-        pass
+        """Clear session"""
+        self.session_token = None
+        self.is_admin = False
+        self.access_level = "none"
     
     def read_coils(self, address: int, count: int) -> Optional[List[bool]]:
         """Read coils (FC 01)"""
@@ -178,7 +245,7 @@ class ModbusHttpClient:
         
         if response and len(response) >= 8:
             fc = response[7]
-            return fc == 5  # Success if FC matches
+            return fc == 5
         return False
     
     def write_single_register(self, address: int, value: int) -> bool:
@@ -192,12 +259,31 @@ class ModbusHttpClient:
             return fc == 6
         return False
     
+    def write_multiple_coils(self, address: int, values: List[bool]) -> bool:
+        """Write multiple coils (FC 15)"""
+        count = len(values)
+        byte_count = (count + 7) // 8
+        
+        # Pack bits into bytes
+        coil_bytes = bytearray(byte_count)
+        for i, val in enumerate(values):
+            if val:
+                coil_bytes[i // 8] |= (1 << (i % 8))
+        
+        data = struct.pack('>HHB', address, count, byte_count) + bytes(coil_bytes)
+        frame = self._build_request_frame(15, data)
+        response = self._send_request(frame)
+        
+        if response and len(response) >= 8:
+            fc = response[7]
+            return fc == 15
+        return False
+    
     def write_multiple_registers(self, address: int, values: List[int]) -> bool:
         """Write multiple registers (FC 16)"""
         count = len(values)
         byte_count = count * 2
         
-        # Pack: address, count, byte_count, then values
         data = struct.pack('>HHB', address, count, byte_count)
         for v in values:
             data += struct.pack('>H', v)
@@ -217,6 +303,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Test HTTP Modbus Client")
     parser.add_argument("url", help="HTTP Bridge URL (e.g., https://xxx.loca.lt)")
+    parser.add_argument("--password", "-p", help="Admin password for write access")
     args = parser.parse_args()
     
     client = ModbusHttpClient(args.url)
@@ -224,8 +311,19 @@ if __name__ == "__main__":
     if client.open():
         console.print("[green]✓[/green] Connected to HTTP Bridge")
         
+        # Authenticate or create read-only session
+        if args.password:
+            if client.authenticate(args.password):
+                console.print(f"[green]✓[/green] Authenticated as ADMIN")
+            else:
+                console.print(f"[red]✗[/red] Auth failed: {client.last_error_as_txt}")
+                client.create_session()
+        else:
+            client.create_session()
+            console.print(f"[yellow]ℹ[/yellow] Read-only session (use -p for admin)")
+        
         # Test read
-        coils = client.read_coils(0, 10)
+        coils = client.read_coils(0, 8)
         if coils:
             console.print(f"Coils: {coils}")
         else:

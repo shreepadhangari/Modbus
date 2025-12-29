@@ -50,40 +50,90 @@ class NetworkConfig:
 
 
 @dataclass
-class SecurityPolicy:
-    """Security policy configuration for Modbus Firewall"""
+class LocalSecurityPolicy:
+    """Security policy for LOCAL connections (no authentication required)"""
     
-    # Whitelist: Function codes that are ALLOWED
+    # Function codes allowed for local connections
     allowed_function_codes: Set[int] = field(default_factory=lambda: {
-        # Read operations (always allowed)
+        # Read operations
         ModbusFunctionCode.READ_COILS,
         ModbusFunctionCode.READ_DISCRETE_INPUTS,
         ModbusFunctionCode.READ_HOLDING_REGISTERS,
         ModbusFunctionCode.READ_INPUT_REGISTERS,
-        # Write register operations (allowed)
+        # Write operations (full access for local)
         ModbusFunctionCode.WRITE_SINGLE_REGISTER,
         ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
     })
     
-    # Blacklist: Function codes that are BLOCKED
+    # Function codes explicitly blocked
     blocked_function_codes: Set[int] = field(default_factory=lambda: {
-        # Write coil operations (blocked - safety critical)
         ModbusFunctionCode.WRITE_SINGLE_COIL,
         ModbusFunctionCode.WRITE_MULTIPLE_COILS,
-        # Complex operations (blocked)
         ModbusFunctionCode.READ_WRITE_MULTIPLE_REGISTERS,
     })
+
+
+@dataclass
+class RemoteSecurityPolicy:
+    """Security policy for REMOTE connections (authentication required for writes)"""
     
-    # IP-based whitelist for write operations (empty = use function code policy)
+    # Read-only function codes (for non-admin remote users)
+    readonly_function_codes: Set[int] = field(default_factory=lambda: {
+        ModbusFunctionCode.READ_COILS,
+        ModbusFunctionCode.READ_DISCRETE_INPUTS,
+        ModbusFunctionCode.READ_HOLDING_REGISTERS,
+        ModbusFunctionCode.READ_INPUT_REGISTERS,
+    })
+    
+    # Admin function codes (for authenticated admin remote users)
+    admin_function_codes: Set[int] = field(default_factory=lambda: {
+        # Read operations
+        ModbusFunctionCode.READ_COILS,
+        ModbusFunctionCode.READ_DISCRETE_INPUTS,
+        ModbusFunctionCode.READ_HOLDING_REGISTERS,
+        ModbusFunctionCode.READ_INPUT_REGISTERS,
+        # Write operations (admin only)
+        ModbusFunctionCode.WRITE_SINGLE_REGISTER,
+        ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
+    })
+    
+    # Function codes always blocked for remote
+    blocked_function_codes: Set[int] = field(default_factory=lambda: {
+        # Coil writes blocked even for admin (safety critical)
+        ModbusFunctionCode.WRITE_SINGLE_COIL,
+        ModbusFunctionCode.WRITE_MULTIPLE_COILS,
+        ModbusFunctionCode.READ_WRITE_MULTIPLE_REGISTERS,
+    })
+
+
+@dataclass
+class AuthConfig:
+    """Authentication configuration for remote access"""
+    admin_password_length: int = 8
+    max_login_attempts: int = 3
+    session_timeout_minutes: int = 30
+
+
+# Keep legacy SecurityPolicy for backward compatibility
+@dataclass
+class SecurityPolicy:
+    """Legacy security policy (use LocalSecurityPolicy/RemoteSecurityPolicy instead)"""
+    allowed_function_codes: Set[int] = field(default_factory=lambda: {
+        ModbusFunctionCode.READ_COILS,
+        ModbusFunctionCode.READ_DISCRETE_INPUTS,
+        ModbusFunctionCode.READ_HOLDING_REGISTERS,
+        ModbusFunctionCode.READ_INPUT_REGISTERS,
+        ModbusFunctionCode.WRITE_SINGLE_REGISTER,
+        ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS,
+    })
+    blocked_function_codes: Set[int] = field(default_factory=lambda: {
+        ModbusFunctionCode.WRITE_SINGLE_COIL,
+        ModbusFunctionCode.WRITE_MULTIPLE_COILS,
+        ModbusFunctionCode.READ_WRITE_MULTIPLE_REGISTERS,
+    })
     write_allowed_ips: Set[str] = field(default_factory=set)
-    
-    # Maintenance mode bypasses all blocking
     maintenance_mode: bool = False
-    
-    # Rate limiting (requests per second per client)
     rate_limit: int = 100
-    
-    # Register-level policies: {register_address: set of allowed function codes}
     register_policies: Dict[int, Set[int]] = field(default_factory=dict)
 
 
@@ -118,7 +168,10 @@ class PLCConfig:
 class Config:
     """Main configuration container"""
     network: NetworkConfig = field(default_factory=NetworkConfig)
-    security: SecurityPolicy = field(default_factory=SecurityPolicy)
+    security: SecurityPolicy = field(default_factory=SecurityPolicy)  # Legacy
+    local_security: LocalSecurityPolicy = field(default_factory=LocalSecurityPolicy)
+    remote_security: RemoteSecurityPolicy = field(default_factory=RemoteSecurityPolicy)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     plc: PLCConfig = field(default_factory=PLCConfig)
 
