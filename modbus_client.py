@@ -90,6 +90,18 @@ class ModbusHMI:
     
     def read_coils(self, start_addr: int = 0, count: int = 10):
         """Read coils (FC 01)"""
+        # Coil names (Thermal Power Plant)
+        coil_names = {
+            0: "Fuel_Motor",
+            1: "Feedwater_Pump",
+            2: "Steam_Valve",
+            3: "Air_Fan",
+            4: "Turbine_Enable",
+            5: "Generator_Connect",
+            6: "Plant_Run",
+            7: "Alarm_Enable",
+        }
+        
         self.console.print(f"\n[cyan]Reading {count} coils from address {start_addr}...[/cyan]")
         
         result = self.client.read_coils(start_addr, count)
@@ -97,11 +109,14 @@ class ModbusHMI:
         if result is not None:
             table = Table(title="Coils (FC 01)")
             table.add_column("Address", justify="right")
-            table.add_column("Value")
+            table.add_column("Name", width=16)
+            table.add_column("Status")
             
             for i, val in enumerate(result):
+                addr = start_addr + i
+                name = coil_names.get(addr, f"Coil_{addr}")
                 status = "[green]ON[/green]" if val else "[red]OFF[/red]"
-                table.add_row(str(start_addr + i), status)
+                table.add_row(str(addr), name, status)
             
             self.console.print(table)
         else:
@@ -109,6 +124,18 @@ class ModbusHMI:
     
     def read_discrete_inputs(self, start_addr: int = 0, count: int = 10):
         """Read discrete inputs (FC 02)"""
+        # Discrete input names (Thermal Power Plant)
+        discrete_names = {
+            0: "Boiler_Lvl_Hi",
+            1: "Boiler_Lvl_Lo",
+            2: "Boiler_Press_Hi",
+            3: "Boiler_Press_Lo",
+            4: "Boiler_Temp_Hi",
+            5: "Turbine_Trip",
+            6: "E-Stop_OK",
+            7: "Fault_Active",
+        }
+        
         self.console.print(f"\n[cyan]Reading {count} discrete inputs from address {start_addr}...[/cyan]")
         
         result = self.client.read_discrete_inputs(start_addr, count)
@@ -116,11 +143,14 @@ class ModbusHMI:
         if result is not None:
             table = Table(title="Discrete Inputs (FC 02)")
             table.add_column("Address", justify="right")
-            table.add_column("Value")
+            table.add_column("Name", width=16)
+            table.add_column("Status")
             
             for i, val in enumerate(result):
+                addr = start_addr + i
+                name = discrete_names.get(addr, f"DI_{addr}")
                 status = "[green]ON[/green]" if val else "[red]OFF[/red]"
-                table.add_row(str(start_addr + i), status)
+                table.add_row(str(addr), name, status)
             
             self.console.print(table)
         else:

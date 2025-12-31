@@ -1,1 +1,7 @@
 # Security Alerts Log
+[SECURITY ALERT] 2025-12-30T10:09:20.634119
+  Blocked WRITE_SINGLE_COIL (FC:05)
+  Source: 127.0.0.1:62573
+  Transaction ID: 1
+  Reason: WRITE_SINGLE_COIL (FC:0x05) is blocked by security policy
+---

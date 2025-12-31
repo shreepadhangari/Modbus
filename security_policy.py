@@ -252,20 +252,44 @@ class SecurityPolicyEngine:
         }
     
     def get_policy_summary(self) -> str:
-        """Get a human-readable summary of current policies"""
+        """Get a human-readable summary of current policies with local/remote sections"""
+        from config import DEFAULT_CONFIG
+        
+        local_policy = DEFAULT_CONFIG.local_security
+        remote_policy = DEFAULT_CONFIG.remote_security
+        
         lines = [
-            "Security Policy Summary",
-            "=" * 40,
+            "[bold cyan]Security Policy Summary[/bold cyan]",
             "",
-            "Allowed Function Codes (Whitelist):",
+            "[green]━━━ LOCAL + REMOTE ADMIN ━━━[/green]",
+            "[dim]Full access for local users and authenticated remote admins[/dim]",
+            "",
+            "[green]Allowed:[/green]",
         ]
         
-        for fc in sorted(self.config.allowed_function_codes):
-            lines.append(f"  - 0x{fc:02X}: {get_function_code_name(fc)}")
+        for fc in sorted(local_policy.allowed_function_codes):
+            lines.append(f"  ✓ 0x{fc:02X}: {get_function_code_name(fc)}")
         
         lines.append("")
-        lines.append("Blocked Function Codes (Blacklist):")
-        for fc in sorted(self.config.blocked_function_codes):
-            lines.append(f"  - 0x{fc:02X}: {get_function_code_name(fc)}")
+        lines.append("[red]Blocked:[/red]")
+        for fc in sorted(local_policy.blocked_function_codes):
+            lines.append(f"  ✗ 0x{fc:02X}: {get_function_code_name(fc)}")
+        
+        lines.append("")
+        lines.append("[yellow]━━━ REMOTE READ-ONLY ━━━[/yellow]")
+        lines.append("[dim]Non-authenticated remote users[/dim]")
+        lines.append("")
+        lines.append("[green]Allowed:[/green]")
+        
+        for fc in sorted(remote_policy.readonly_function_codes):
+            lines.append(f"  ✓ 0x{fc:02X}: {get_function_code_name(fc)}")
+        
+        lines.append("")
+        lines.append("[red]Blocked (all writes):[/red]")
+        
+        # All write operations are blocked for read-only
+        write_codes = {0x05, 0x06, 0x0F, 0x10, 0x17}
+        for fc in sorted(write_codes):
+            lines.append(f"  ✗ 0x{fc:02X}: {get_function_code_name(fc)}")
         
         return "\n".join(lines)

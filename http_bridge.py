@@ -159,9 +159,18 @@ class ModbusHttpBridge:
     async def handle_modbus_request(self, request: web.Request) -> web.Response:
         """Handle Modbus request with access control"""
         try:
+            # Get client IP address (check forwarded headers for proxy/tunnel)
+            client_ip = request.headers.get('X-Forwarded-For', 
+                        request.headers.get('X-Real-IP',
+                        request.remote or 'unknown'))
+            # If X-Forwarded-For has multiple IPs, take the first one
+            if ',' in client_ip:
+                client_ip = client_ip.split(',')[0].strip()
+            
             # Get session token from header
             token = request.headers.get('X-Session-Token', '')
             session = self.validate_session(token)
+            access_level = "ADMIN" if session.get('is_admin') else "READ-ONLY"
             
             # Parse request
             data = await request.json()
@@ -175,21 +184,30 @@ class ModbusHttpBridge:
             except Exception as e:
                 return web.json_response({"error": f"Invalid base64: {e}"}, status=400)
             
+            # Extract function code for logging
+            fc = modbus_frame[7] if len(modbus_frame) > 7 else 0
+            
             # Access control check
             is_write = self.is_write_operation(modbus_frame)
             
             if is_write:
                 if not session['valid']:
+                    console.print(f"[yellow]HTTPS[/yellow] {client_ip} | FC 0x{fc:02X} | [red]BLOCKED[/red] (no session)")
                     return web.json_response({
                         "error": "Session required for write operations",
                         "code": "NO_SESSION"
                     }, status=401)
                 
                 if not session['is_admin']:
+                    console.print(f"[yellow]HTTPS[/yellow] {client_ip} | FC 0x{fc:02X} | [red]BLOCKED[/red] (read-only)")
                     return web.json_response({
                         "error": "Admin access required for write operations",
                         "code": "READ_ONLY"
                     }, status=403)
+            
+            # Log the request
+            action_color = "green" if not is_write else "cyan"
+            console.print(f"[yellow]HTTPS[/yellow] {client_ip} | FC 0x{fc:02X} | [{action_color}]ALLOWED[/{action_color}] ({access_level})")
             
             # Forward to Modbus server
             try:
